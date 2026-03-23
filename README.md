@@ -14,27 +14,6 @@ sfl-advisor/
 ├── netlify.toml            ← Configuración de Netlify
 └── package.json
 ```
-
-## Cómo deployar en Netlify
-
-### Opción A — GitHub + Netlify (recomendado)
-
-1. Subí esta carpeta a un repo de GitHub
-2. Entrá a [netlify.com](https://netlify.com) → "Add new site" → "Import from Git"
-3. Seleccioná tu repo
-4. En "Build settings":
-   - **Publish directory:** `public`
-   - **Functions directory:** `netlify/functions`
-5. Click "Deploy site"
-
-### Opción B — Netlify CLI
-
-```bash
-npm install -g netlify-cli
-netlify login
-netlify deploy --prod --dir=public --functions=netlify/functions
-```
-
 ## Cómo usar
 
 1. Elegí el tipo de búsqueda: **Username**, **Farm ID** o **NFT ID**
