@@ -739,6 +739,13 @@
     border-color: var(--green2);
     color: var(--green);
   }
+
+  /* ── DEBUG ── */
+  #debugPanel { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+  .debug-block { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 16px; }
+  .debug-label { font-family: var(--mono); font-size: 0.65rem; color: var(--amber); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .debug-pre { font-family: var(--mono); font-size: 0.68rem; color: var(--text3); white-space: pre-wrap; word-break: break-all; line-height: 1.6; max-height: 200px; overflow-y: auto; }
+
 </style>
 </head>
 <body>
@@ -767,7 +774,7 @@
         <button class="tab-btn" data-type="farm_id">Farm ID</button>
       </div>
       <div class="search-input-wrap">
-        <input type="text" id="searchInput" placeholder="ezmez" autocomplete="off" />
+        <input type="text" id="searchInput" placeholder="Tu username o Farm ID" autocomplete="off" />
       </div>
       <button class="btn-search" id="btnSearch" onclick="loadFarm()">Analizar Granja →</button>
     </div>
@@ -781,10 +788,7 @@
   <div class="welcome" id="welcomeScreen">
     <h2>Maximizá tus<br/><em>ganancias $SFL</em></h2>
     <p>Analizamos tu granja de Sunflower Land en tiempo real y generamos una estrategia personalizada basada en tus NFTs, boosts y precios del mercado.</p>
-    <div class="example-ids">
-      <div class="example-chip" onclick="fillExample('username','ezmez')">username: ezmez</div>
-      <div class="example-chip" onclick="fillExample('farm_id','6777707846793896')">farm ID: 6777707846793896</div>
-    </div>
+
   </div>
 
   <!-- DASHBOARD -->
@@ -830,24 +834,13 @@
       </div>
     </div>
 
-    <!-- ROW 3: AI Strategy (full width) -->
-    <div class="strategy-card" id="strategyCard">
-      <div class="strategy-header">
-        <div class="ai-badge">⚡ AI Strategy</div>
-        <div class="strategy-title">Estrategia personalizada para tu granja</div>
-        <button class="btn-generate" id="btnGenerate" onclick="generateStrategy()" style="margin-left:auto">
-          Generar estrategia
-        </button>
-      </div>
-      <div id="strategyContent">
-        <div class="empty-state">
-          <div class="big">🤖</div>
-          Presioná "Generar estrategia" para obtener<br/>un análisis completo de tu granja
-        </div>
-      </div>
-    </div>
+
 
   </div>
+
+  <!-- DEBUG PANEL -->
+  <div id="debugPanel" style="display:none"></div>
+
 </div>
 
 <script>
@@ -883,15 +876,6 @@ async function apiCall(endpoint) {
   return res.json();
 }
 
-async function aiCall(payload) {
-  const res = await fetch('/api/proxy?type=ai', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  if (!res.ok) throw new Error(`AI proxy HTTP ${res.status}`);
-  return res.json();
-}
 
 function updateCorsStatus(mode) {
   const el = document.getElementById('corsMode');
@@ -1050,12 +1034,10 @@ function renderDashboard() {
   renderNFTs();
   renderBoosts();
   renderMarketPrices();
+  renderDebug();
   document.getElementById('dashboard').classList.add('visible');
-  document.getElementById('strategyContent').innerHTML = `
-    <div class="empty-state">
-      <div class="big">🤖</div>
-      Tu granja está lista. Presioná "Generar estrategia" para obtener un análisis completo.
-    </div>`;
+  document.getElementById('debugPanel').style.display = 'flex';
+
 }
 
 // ─── FARM INFO ───
@@ -1295,145 +1277,26 @@ function renderMarketPrices() {
 // ─────────────────────────────────────────────
 //  AI STRATEGY
 // ─────────────────────────────────────────────
-async function generateStrategy() {
-  const btn = document.getElementById('btnGenerate');
-  const content = document.getElementById('strategyContent');
-  btn.disabled = true;
-  btn.textContent = '⏳ Analizando...';
 
-  content.innerHTML = `
-    <div class="strategy-body loading-text">
-      <div style="display:flex;align-items:center;gap:10px">
-        <div class="spinner"></div>
-        Analizando tu granja con IA...
-      </div>
-    </div>`;
 
-  try {
-    const ctx = buildFarmContext();
-    const data = await aiCall({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      system: 'Eres un experto analista de Sunflower Land (SFL), el juego blockchain en Polygon.' +
-        ' Analizas granjas y das estrategias para maximizar ganancias en $SFL.' +
-        ' Responde SOLO en JSON valido, sin markdown, sin texto extra:' +
-        ' {"resumen":"...","fortalezas":["..."],"estrategia_inmediata":["..."],"nfts_recomendados":["..."],"advertencias":["..."],"potencial_sfl_diario":"..."}',
-      messages: [{ role: 'user', content: ctx }]
-    });
 
-    const text = (data.content || []).map(c => c.text || '').join('').trim();
-    let parsed;
-    try {
-      // Strip markdown fences safely (no backtick regex)
-      let clean = text;
-      const fs = clean.indexOf('```');
-      if (fs !== -1) {
-        const fe = clean.lastIndexOf('```');
-        if (fe > fs) { const nl = clean.indexOf('\n', fs); clean = clean.substring(nl !== -1 ? nl + 1 : fs + 3, fe); }
-      }
-      const js = clean.indexOf('{');
-      const je = clean.lastIndexOf('}');
-      if (js !== -1 && je !== -1) clean = clean.substring(js, je + 1);
-      parsed = JSON.parse(clean.trim());
-    } catch (e2) {
-      content.innerHTML = '<div class="strategy-body">' + escHtml(text) + '</div>';
-      return;
-    }
-    renderStrategy(parsed);
-
-  } catch(err) {
-    content.innerHTML = `<div class="strategy-body loading-text" style="color:var(--red)">Error: ${escHtml(err.message)}</div>`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Regenerar';
-  }
+// ─────────────────────────────────────────────
+//  DEBUG PANEL
+// ─────────────────────────────────────────────
+function renderDebug() {
+  const el = document.getElementById('debugPanel');
+  if (!el) return;
+  const sections = [
+    { label: 'FARM v1.1 (primeras 600 chars)', data: farmData },
+    { label: 'PRECIOS', data: marketPrices },
+    { label: 'EXCHANGE', data: exchangeData },
+  ];
+  el.innerHTML = sections.map(s => {
+    const txt = s.data ? JSON.stringify(s.data).substring(0, 600) : 'null';
+    return '<div class="debug-block"><div class="debug-label">' + s.label + '</div><pre class="debug-pre">' + escHtml(txt) + '</pre></div>';
+  }).join('');
 }
 
-function buildFarmContext() {
-  const info = farmData?._info || {};
-  const username = deepGet(info, 'username') ?? deepGet(farmData, 'username', 'name') ?? 'Desconocido';
-  const nftId = currentNftId ?? '?';
-  const sflBal = extractNumber(deepGet(farmData, 'balance.sfl', 'sfl', 'wallet.sfl'));
-  const coins = extractNumber(deepGet(farmData, 'balance.coins', 'coins'));
-
-  const inventory = farmData?.inventory || farmData?.items || {};
-  const topItems = Object.entries(inventory)
-    .map(([k, v]) => ({ k, n: extractNumber(v) }))
-    .filter(x => x.n > 0)
-    .sort((a, b) => b.n - a.n)
-    .slice(0, 25)
-    .map(x => `${x.k}: ${x.n}`)
-    .join(', ');
-
-  const boostsSummary = landBoosts
-    ? JSON.stringify(landBoosts).substring(0, 600)
-    : 'sin datos';
-
-  const p2pTop = marketPrices?.p2p
-    ? Object.entries(marketPrices.p2p).slice(0, 12)
-        .map(([k, v]) => { const n = extractNumber(v) ?? extractNumber(v?.floorPrice); return n ? `${k}: ${n.toFixed(4)} SFL` : null; })
-        .filter(Boolean).join(', ')
-    : 'sin datos';
-
-  const sflUsd = exchangeData ? (extractNumber(exchangeData.sfl) ?? extractNumber(exchangeData.SFL)) : null;
-
-  return `Analizá esta granja de Sunflower Land:
-
-GRANJA:
-- Username: ${username}
-- NFT ID: ${nftId}
-- Balance $SFL: ${sflBal ?? 'no disponible'}
-- Coins: ${coins ?? 'no disponible'}
-
-INVENTARIO (top 25 por cantidad): ${topItems || 'vacío o no disponible'}
-
-BOOSTS DE PRODUCCIÓN (JSON): ${boostsSummary}
-
-PRECIOS P2P DEL MERCADO (top 12): ${p2pTop}
-
-PRECIO $SFL en USD: ${sflUsd != null ? '$' + sflUsd.toFixed(4) : 'no disponible'}
-
-Con estos datos, generá una estrategia completa y accionable para maximizar las ganancias en $SFL.`;
-}
-
-function renderStrategy(parsed) {
-  const content = document.getElementById('strategyContent');
-  const list = (arr) => arr?.length
-    ? `<ul>${arr.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul>`
-    : '<p style="color:var(--text3)">Sin datos</p>';
-
-  content.innerHTML = `
-    <div class="strategy-sections">
-      <div class="strategy-block">
-        <div class="strategy-block-title green">📊 Resumen</div>
-        <p>${escHtml(parsed.resumen || '—')}</p>
-      </div>
-      <div class="grid-2" style="gap:16px">
-        <div class="strategy-block">
-          <div class="strategy-block-title green">✅ Fortalezas</div>
-          ${list(parsed.fortalezas)}
-        </div>
-        <div class="strategy-block warn">
-          <div class="strategy-block-title amber">⚠️ Advertencias</div>
-          ${list(parsed.advertencias)}
-        </div>
-      </div>
-      <div class="strategy-block">
-        <div class="strategy-block-title green">⚡ Estrategia inmediata</div>
-        ${list(parsed.estrategia_inmediata)}
-      </div>
-      <div class="strategy-block buy">
-        <div class="strategy-block-title blue">🛒 NFTs recomendados</div>
-        ${list(parsed.nfts_recomendados)}
-      </div>
-      <div class="strategy-block" style="display:flex;align-items:center;gap:16px">
-        <div>
-          <div class="strategy-block-title green">💰 Potencial estimado</div>
-          <p style="font-size:1.1rem;font-weight:700;color:var(--sfl);font-family:var(--mono)">${escHtml(parsed.potencial_sfl_diario || '—')}</p>
-        </div>
-      </div>
-    </div>`;
-}
 
 // ─────────────────────────────────────────────
 //  HELPERS
