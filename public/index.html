@@ -739,13 +739,6 @@
     border-color: var(--green2);
     color: var(--green);
   }
-
-  /* ── DEBUG ── */
-  #debugPanel { margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
-  .debug-block { background: var(--bg2); border: 1px solid var(--border2); border-radius: 10px; padding: 16px; }
-  .debug-label { font-family: var(--mono); font-size: 0.65rem; color: var(--amber); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
-  .debug-pre { font-family: var(--mono); font-size: 0.68rem; color: var(--text3); white-space: pre-wrap; word-break: break-all; line-height: 1.6; max-height: 200px; overflow-y: auto; }
-
 </style>
 </head>
 <body>
@@ -837,9 +830,6 @@
 
 
   </div>
-
-  <!-- DEBUG PANEL -->
-  <div id="debugPanel" style="display:none"></div>
 
 </div>
 
@@ -940,33 +930,36 @@ async function loadExchangePrices() {
     const data = await apiCall('/api/v1.1/exchange');
     exchangeData = data;
 
-    // The API returns: { sfl: number, pol: number, gems: { usd: number, ... }, coins: number, ... }
-    // or nested objects — handle both
-    const sfl = extractNumber(data.sfl) ?? extractNumber(data.SFL);
-    const pol = extractNumber(data.pol) ?? extractNumber(data.POL) ?? extractNumber(data.matic);
-    // gems might be an object with a usd field or a direct number
-    let gems = null;
-    if (data.gems != null) {
-      gems = extractNumber(data.gems);
-      if (gems == null && typeof data.gems === 'object') gems = extractNumber(data.gems.usd);
-    }
-    if (gems == null && data.GEMS != null) {
-      gems = extractNumber(data.GEMS);
-      if (gems == null && typeof data.GEMS === 'object') gems = extractNumber(data.GEMS.usd);
-    }
+    // Real structure: { sfl: {"1":{usd:0.09}, "100":{usd:...}}, pol: {usd:0.094}, gems: {"100":{usd:...}}, coins: {"1350":{usd:...}} }
+    const getSingle = (obj) => {
+      if (!obj) return null;
+      const n = extractNumber(obj);
+      if (n != null) return n;
+      if (typeof obj === 'object') {
+        // grab first key's usd value
+        const first = Object.values(obj)[0];
+        if (first && typeof first === 'object') return extractNumber(first.usd);
+        return extractNumber(obj.usd);
+      }
+      return null;
+    };
 
-    document.getElementById('hp-sfl').textContent = sfl != null ? `$${sfl.toFixed(4)}` : '—';
-    document.getElementById('hp-pol').textContent = pol != null ? `$${pol.toFixed(4)}` : '—';
-    document.getElementById('hp-gems').textContent = gems != null ? `$${gems.toFixed(4)}` : '—';
+    const sfl  = getSingle(data.sfl);
+    const pol  = getSingle(data.pol);
+    const gems = getSingle(data.gems);
+
+    document.getElementById('hp-sfl').textContent  = sfl  != null ? '$' + sfl.toFixed(4)  : '—';
+    document.getElementById('hp-pol').textContent  = pol  != null ? '$' + pol.toFixed(4)  : '—';
+    document.getElementById('hp-gems').textContent = gems != null ? '$' + gems.toFixed(4) : '—';
 
     // Ticker
     const ticker = document.getElementById('tickerBar');
-    const items = [];
+    const tickerItems = [];
     for (const [k, v] of Object.entries(data)) {
-      const n = extractNumber(v) ?? (v && typeof v === 'object' ? extractNumber(v.usd) : null);
-      if (n != null) items.push(`<div class="ticker-item"><span class="key">${k.toUpperCase()}</span><span class="val amber">$${n.toFixed(4)}</span></div>`);
+      const n = getSingle(v);
+      if (n != null) tickerItems.push('<div class="ticker-item"><span class="key">' + k.toUpperCase() + '</span><span class="val amber">$' + n.toFixed(4) + '</span></div>');
     }
-    ticker.innerHTML = items.join('') || '<span class="key">Precios cargados</span>';
+    ticker.innerHTML = tickerItems.join('') || '<span class="key">Precios cargados</span>';
   } catch(e) {
     console.warn('Exchange prices error:', e.message);
   }
@@ -988,7 +981,7 @@ async function loadFarm() {
     // Step 1: resolve IDs
     setStatus('loading', 'Resolviendo identificadores...');
     const info = await apiCall(`/api/v1/land/info/${searchType}/${encodeURIComponent(query)}`);
-    console.log('INFO response:', JSON.stringify(info).substring(0, 300));
+
 
     // info can be: { nft_id, farm_id, username } or just a number
     const nftId = deepGet(info, 'nft_id', 'nftId') ?? (typeof info === 'number' ? info : null) ?? query;
@@ -1007,9 +1000,9 @@ async function loadFarm() {
     landBoosts = boostsRes.status === 'fulfilled' ? boostsRes.value : null;
     marketPrices = pricesRes.status === 'fulfilled' ? pricesRes.value : null;
 
-    console.log('=== FARM v1.1 ===', JSON.stringify(farmData).substring(0, 800));
-    console.log('=== BOOSTS v1 ===', JSON.stringify(landBoosts).substring(0, 400));
-    console.log('=== PRICES ===', JSON.stringify(marketPrices).substring(0, 600));
+
+
+
 
     if (!farmData) throw new Error('No se pudo cargar la granja');
 
@@ -1034,9 +1027,7 @@ function renderDashboard() {
   renderNFTs();
   renderBoosts();
   renderMarketPrices();
-  renderDebug();
   document.getElementById('dashboard').classList.add('visible');
-  document.getElementById('debugPanel').style.display = 'flex';
 
 }
 
@@ -1050,57 +1041,33 @@ function renderFarmInfo() {
   const username = deepGet(info, 'username', 'name') ?? deepGet(d, 'username', 'name') ?? '—';
   const farmId   = deepGet(info, 'farm_id', 'farmId') ?? deepGet(d, 'farm_id', 'farmId') ?? '—';
 
-  // SFL balance — the v1.1 API nests it differently, try all known paths
-  let sflBal = null;
-  const sflPaths = ['balance.sfl','sfl','wallet.sfl','tokens.sfl','state.balance','farmData.balance.sfl','data.balance.sfl'];
-  for (const p of sflPaths) {
-    const v = deepGet(d, p);
-    const n = extractNumber(v);
-    if (n != null) { sflBal = n; break; }
-  }
-  // Also check if balance is a direct number
-  if (sflBal == null && d.balance != null) {
-    sflBal = extractNumber(d.balance);
-  }
+  // Real API v1.1 structure: { land: { balance: 145.91, coins: 57041, gem: 16963, ... } }
+  const land = d.land || d;
+  const sflBal = extractNumber(land.balance) ?? extractNumber(deepGet(d, 'balance.sfl', 'sfl'));
+  const coins  = extractNumber(land.coins)   ?? extractNumber(deepGet(d, 'coins', 'balance.coins'));
+  const gems   = extractNumber(land.gem)     ?? extractNumber(deepGet(d, 'gem', 'gems'));
 
-  // Coins — same approach
-  let coins = null;
-  const coinPaths = ['balance.coins','coins','wallet.coins','state.coins','farmData.coins','data.coins'];
-  for (const p of coinPaths) {
-    const v = deepGet(d, p);
-    const n = extractNumber(v);
-    if (n != null) { coins = n; break; }
-  }
-
-  // Inventory count — check multiple sources
-  const inventory = d.inventory || d.collectibles || d.items || d.state?.inventory || {};
+  // Inventory — bumpkin skills + collectibles
+  const inventory = land.inventory || d.inventory || {};
   const itemCount = Object.keys(inventory).filter(k => {
     const v = inventory[k];
     const n = extractNumber(v);
-    return (n != null && n > 0) || (Array.isArray(v) && v.length > 0) || (typeof v === 'object' && v != null && !Array.isArray(v));
+    return (n != null && n > 0) || (Array.isArray(v) && v.length > 0);
   }).length;
 
-  document.getElementById('farmInfoContent').innerHTML = `
-    <div class="farm-name">${escHtml(username !== '—' ? username : 'Granja #' + nftId)}</div>
-    <div class="farm-meta">
-      <div class="farm-meta-item"><span class="key">NFT:</span><span>#${nftId}</span></div>
-      <div class="farm-meta-item"><span class="key">Farm ID:</span><span>${String(farmId).substring(0,14)}${String(farmId).length > 14 ? '…' : ''}</span></div>
-    </div>
-    <div class="stat-row">
-      <div class="stat-box">
-        <span class="val">${sflBal != null ? formatNum(sflBal) : '—'}</span>
-        <span class="lbl">$SFL</span>
-      </div>
-      <div class="stat-box">
-        <span class="val">${coins != null ? formatNum(coins) : '—'}</span>
-        <span class="lbl">Coins</span>
-      </div>
-      <div class="stat-box">
-        <span class="val">${itemCount}</span>
-        <span class="lbl">Items</span>
-      </div>
-    </div>
-  `;
+  const farmName = escHtml(username !== '—' ? username : 'Granja #' + nftId);
+  const farmIdShort = String(farmId).substring(0,14) + (String(farmId).length > 14 ? '…' : '');
+  document.getElementById('farmInfoContent').innerHTML =
+    '<div class="farm-name">' + farmName + '</div>' +
+    '<div class="farm-meta">' +
+      '<div class="farm-meta-item"><span class="key">NFT:</span><span>#' + nftId + '</span></div>' +
+      '<div class="farm-meta-item"><span class="key">Farm ID:</span><span>' + farmIdShort + '</span></div>' +
+    '</div>' +
+    '<div class="stat-row">' +
+      '<div class="stat-box"><span class="val">' + (sflBal != null ? formatNum(sflBal) : '—') + '</span><span class="lbl">$SFL</span></div>' +
+      '<div class="stat-box"><span class="val">' + (coins != null ? formatNum(coins) : '—') + '</span><span class="lbl">Coins</span></div>' +
+      '<div class="stat-box"><span class="val">' + (gems != null ? formatNum(gems) : '—') + '</span><span class="lbl">Gems</span></div>' +
+    '</div>';
 }
 
 // ─── NFTs ───
@@ -1219,27 +1186,12 @@ function renderMarketPrices() {
     return;
   }
 
-  console.log('PRICES structure:', JSON.stringify(marketPrices).substring(0, 600));
 
-  // The prices API returns: { p2p: {...}, seq: {...}, updatedAt: "..." }
-  // OR it might be wrapped: { data: { p2p: {...}, seq: {...} } }
-  // OR the keys might be item names directly at top level
-  let p2p = {};
-  let seq = {};
-  if (marketPrices.p2p) {
-    p2p = marketPrices.p2p;
-    seq = marketPrices.seq || {};
-  } else if (marketPrices.data?.p2p) {
-    p2p = marketPrices.data.p2p;
-    seq = marketPrices.data.seq || {};
-  } else {
-    // Maybe prices are at top level with item names as keys
-    // Filter out non-item keys
-    const skip = new Set(['updatedAt','status','error','data','meta']);
-    for (const [k,v] of Object.entries(marketPrices)) {
-      if (!skip.has(k)) p2p[k] = v;
-    }
-  }
+
+  // Real structure: { data: { p2p: { "Sunflower": 0.0003, ... }, seq: {...} } }
+  const priceRoot = marketPrices.data || marketPrices;
+  const p2p = priceRoot.p2p || {};
+  const seq = priceRoot.seq || {};
 
   const getPrice = (obj, key) => {
     const v = obj[key];
@@ -1279,23 +1231,6 @@ function renderMarketPrices() {
 // ─────────────────────────────────────────────
 
 
-
-// ─────────────────────────────────────────────
-//  DEBUG PANEL
-// ─────────────────────────────────────────────
-function renderDebug() {
-  const el = document.getElementById('debugPanel');
-  if (!el) return;
-  const sections = [
-    { label: 'FARM v1.1 (primeras 600 chars)', data: farmData },
-    { label: 'PRECIOS', data: marketPrices },
-    { label: 'EXCHANGE', data: exchangeData },
-  ];
-  el.innerHTML = sections.map(s => {
-    const txt = s.data ? JSON.stringify(s.data).substring(0, 600) : 'null';
-    return '<div class="debug-block"><div class="debug-label">' + s.label + '</div><pre class="debug-pre">' + escHtml(txt) + '</pre></div>';
-  }).join('');
-}
 
 
 // ─────────────────────────────────────────────
