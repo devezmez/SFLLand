@@ -795,7 +795,11 @@
       <div class="card" id="cardFarmInfo">
         <div class="card-header">
           <div class="card-title">// Identidad de la granja</div>
-          <div class="card-badge badge-green" id="farmBadge">LIVE</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span id="lastUpdated" style="font-family:var(--mono);font-size:0.62rem;color:var(--text3)"></span>
+            <button id="btnRefresh" onclick="refreshFarm()" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-family:var(--mono);font-size:0.65rem;color:var(--text2);cursor:pointer;transition:all 0.2s" onmouseover="this.style.borderColor='var(--green2)';this.style.color='var(--green)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text2)'">⟳ Refresh</button>
+            <div class="card-badge badge-green" id="farmBadge">LIVE</div>
+          </div>
         </div>
         <div id="farmInfoContent"></div>
       </div>
@@ -1007,8 +1011,13 @@ async function loadFarm() {
     if (!farmData) throw new Error('No se pudo cargar la granja');
 
     farmData._info = info;
+    lastQuery = query;
+    lastSearchType = searchType;
+    const loadTime = new Date().toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
     renderDashboard();
-    setStatus('ok', `Granja #${nftId} cargada · ${new Date().toLocaleTimeString('es-AR')}`);
+    const upd = document.getElementById('lastUpdated');
+    if (upd) upd.textContent = 'Actualizado ' + loadTime;
+    setStatus('ok', 'Granja #' + nftId + ' cargada · ' + loadTime);
 
   } catch(err) {
     console.error('loadFarm error:', err);
@@ -1236,12 +1245,16 @@ function renderMarketPrices() {
 // ─────────────────────────────────────────────
 //  HELPERS
 // ─────────────────────────────────────────────
-function formatNum(val) {
+function formatNum(val, abbreviate) {
   const n = typeof val === 'number' ? val : parseFloat(val);
   if (isNaN(n)) return '—';
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-  return n.toFixed(n < 10 ? 2 : 0);
+  if (abbreviate) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  }
+  // Show exact value with locale formatting
+  if (Number.isInteger(n)) return n.toLocaleString('es-AR');
+  return n.toFixed(2);
 }
 
 function escHtml(str) {
@@ -1250,10 +1263,68 @@ function escHtml(str) {
 }
 
 // ─────────────────────────────────────────────
+//  REFRESH
+// ─────────────────────────────────────────────
+let autoRefreshTimer = null;
+let lastQuery = null;
+let lastSearchType = null;
+
+async function refreshFarm() {
+  if (!lastQuery) return;
+  const btn = document.getElementById('btnRefresh');
+  const badge = document.getElementById('farmBadge');
+  if (btn) { btn.textContent = '⟳ ...'; btn.disabled = true; }
+  if (badge) badge.textContent = 'UPDATING';
+
+  // Re-run with last query
+  const savedType = searchType;
+  searchType = lastSearchType || searchType;
+  document.getElementById('searchInput').value = lastQuery;
+
+  try {
+    const info = await apiCall('/api/v1/land/info/' + searchType + '/' + encodeURIComponent(lastQuery));
+    const nftId = deepGet(info, 'nft_id', 'nftId') ?? (typeof info === 'number' ? info : null) ?? lastQuery;
+    currentNftId = nftId;
+
+    const [landRes, boostsRes, pricesRes] = await Promise.allSettled([
+      apiCall('/api/v1.1/land/' + nftId),
+      apiCall('/api/v1/land/' + nftId),
+      apiCall('/api/v1/prices'),
+    ]);
+
+    if (landRes.status === 'fulfilled') { farmData = landRes.value; farmData._info = info; }
+    if (boostsRes.status === 'fulfilled') landBoosts = boostsRes.value;
+    if (pricesRes.status === 'fulfilled') marketPrices = pricesRes.value;
+
+    renderDashboard();
+    const now = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const upd = document.getElementById('lastUpdated');
+    if (upd) upd.textContent = 'Actualizado ' + now;
+    setStatus('ok', 'Granja actualizada · ' + now);
+  } catch(e) {
+    setStatus('error', 'Error al actualizar: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = '⟳ Refresh'; btn.disabled = false; }
+    if (badge) badge.textContent = 'LIVE';
+    searchType = savedType;
+  }
+}
+
+function startAutoRefresh(minutes) {
+  stopAutoRefresh();
+  autoRefreshTimer = setInterval(refreshFarm, minutes * 60 * 1000);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+}
+
+// ─────────────────────────────────────────────
 //  INIT
 // ─────────────────────────────────────────────
 loadExchangePrices();
 setInterval(loadExchangePrices, 5 * 60 * 1000);
+startAutoRefresh(15); // auto-refresh farm every 15 min
 </script>
 </body>
 </html>
