@@ -40,11 +40,15 @@ module.exports = async (req, res) => {
         req.on("end", resolve);
       });
 
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "ANTHROPIC_API_KEY no configurada en Vercel" });
+
       const result = await fetchUrl("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "anthropic-version": "2023-06-01",
+          "x-api-key": apiKey,
         },
         body,
       });

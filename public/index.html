@@ -1023,9 +1023,9 @@ async function loadFarm() {
     landBoosts = boostsRes.status === 'fulfilled' ? boostsRes.value : null;
     marketPrices = pricesRes.status === 'fulfilled' ? pricesRes.value : null;
 
-    console.log('FARM data keys:', farmData ? Object.keys(farmData).join(', ') : 'null');
-    console.log('BOOSTS keys:', landBoosts ? Object.keys(landBoosts).join(', ') : 'null');
-    console.log('PRICES keys:', marketPrices ? Object.keys(marketPrices).join(', ') : 'null');
+    console.log('=== FARM v1.1 ===', JSON.stringify(farmData).substring(0, 800));
+    console.log('=== BOOSTS v1 ===', JSON.stringify(landBoosts).substring(0, 400));
+    console.log('=== PRICES ===', JSON.stringify(marketPrices).substring(0, 600));
 
     if (!farmData) throw new Error('No se pudo cargar la granja');
 
@@ -1068,19 +1068,34 @@ function renderFarmInfo() {
   const username = deepGet(info, 'username', 'name') ?? deepGet(d, 'username', 'name') ?? '—';
   const farmId   = deepGet(info, 'farm_id', 'farmId') ?? deepGet(d, 'farm_id', 'farmId') ?? '—';
 
-  // SFL balance — try many paths
-  const sflRaw = deepGet(d, 'balance.sfl', 'sfl', 'wallet.sfl', 'tokens.sfl');
-  const sflBal = extractNumber(sflRaw);
+  // SFL balance — the v1.1 API nests it differently, try all known paths
+  let sflBal = null;
+  const sflPaths = ['balance.sfl','sfl','wallet.sfl','tokens.sfl','state.balance','farmData.balance.sfl','data.balance.sfl'];
+  for (const p of sflPaths) {
+    const v = deepGet(d, p);
+    const n = extractNumber(v);
+    if (n != null) { sflBal = n; break; }
+  }
+  // Also check if balance is a direct number
+  if (sflBal == null && d.balance != null) {
+    sflBal = extractNumber(d.balance);
+  }
 
-  // Coins
-  const coinsRaw = deepGet(d, 'balance.coins', 'coins', 'wallet.coins');
-  const coins = extractNumber(coinsRaw);
+  // Coins — same approach
+  let coins = null;
+  const coinPaths = ['balance.coins','coins','wallet.coins','state.coins','farmData.coins','data.coins'];
+  for (const p of coinPaths) {
+    const v = deepGet(d, p);
+    const n = extractNumber(v);
+    if (n != null) { coins = n; break; }
+  }
 
-  // Inventory count
-  const inventory = d.inventory || d.items || {};
+  // Inventory count — check multiple sources
+  const inventory = d.inventory || d.collectibles || d.items || d.state?.inventory || {};
   const itemCount = Object.keys(inventory).filter(k => {
     const v = inventory[k];
-    return extractNumber(v) > 0 || (typeof v === 'object' && v != null);
+    const n = extractNumber(v);
+    return (n != null && n > 0) || (Array.isArray(v) && v.length > 0) || (typeof v === 'object' && v != null && !Array.isArray(v));
   }).length;
 
   document.getElementById('farmInfoContent').innerHTML = `
@@ -1222,12 +1237,27 @@ function renderMarketPrices() {
     return;
   }
 
-  console.log('PRICES structure:', JSON.stringify(marketPrices).substring(0, 400));
+  console.log('PRICES structure:', JSON.stringify(marketPrices).substring(0, 600));
 
   // The prices API returns: { p2p: {...}, seq: {...}, updatedAt: "..." }
-  // Each key inside p2p/seq can be: item name → price number OR { floorPrice: number }
-  const p2p = marketPrices.p2p || {};
-  const seq = marketPrices.seq || {};
+  // OR it might be wrapped: { data: { p2p: {...}, seq: {...} } }
+  // OR the keys might be item names directly at top level
+  let p2p = {};
+  let seq = {};
+  if (marketPrices.p2p) {
+    p2p = marketPrices.p2p;
+    seq = marketPrices.seq || {};
+  } else if (marketPrices.data?.p2p) {
+    p2p = marketPrices.data.p2p;
+    seq = marketPrices.data.seq || {};
+  } else {
+    // Maybe prices are at top level with item names as keys
+    // Filter out non-item keys
+    const skip = new Set(['updatedAt','status','error','data','meta']);
+    for (const [k,v] of Object.entries(marketPrices)) {
+      if (!skip.has(k)) p2p[k] = v;
+    }
+  }
 
   const getPrice = (obj, key) => {
     const v = obj[key];
